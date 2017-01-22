@@ -22,6 +22,7 @@ type Config struct {
     ForceSSL    bool `json:"forcessl"`
     ForceUrl    string `json:"forceurl"`
     SharePath   string `json:"sharepath"`
+    WorkPath    string `json:"workpath"`
 }
 
 type Files struct {
@@ -128,7 +129,7 @@ func home(w http.ResponseWriter, r *http.Request) {
     realPath := config.Path + urlPath
     backPath := filepath.Dir(r.URL.Path)
     files, _ := ioutil.ReadDir(realPath)
-    
+
     if _, err := os.Stat(realPath); os.IsNotExist(err) {
         tmpl, err := template.ParseFiles("templates/notfound.html")
         if err != nil {
@@ -185,7 +186,7 @@ func home(w http.ResponseWriter, r *http.Request) {
 func getshare(w http.ResponseWriter, r *http.Request) {
     //path := r.URL.Path
     fileShare := r.URL.Path[len(config.WebRoot+"/getshare"):]
-    
+
     dat, err := ioutil.ReadFile(config.SharePath+fileShare)
     if err != nil {
         fmt.Println(err)
@@ -199,7 +200,7 @@ func getshare(w http.ResponseWriter, r *http.Request) {
         return
     }
     filePath := string(dat)
-    
+
     if _, err := os.Stat(filePath); os.IsNotExist(err) {
         tmpl, err := template.ParseFiles("templates/notfound.html")
         if err != nil {
@@ -210,7 +211,7 @@ func getshare(w http.ResponseWriter, r *http.Request) {
         tmpl.Execute(w, Err)
         return
     }
-    
+
     w.Header().Set("Content-Disposition", "attachment; filename=\""+filepath.Base(filePath)+"\"")
     http.ServeFile(w, r, filePath)
     log.Printf(filePath)
@@ -222,46 +223,46 @@ func createshare(w http.ResponseWriter, r *http.Request) {
     if config.ForceUrl != "" { r.Host = config.ForceUrl }
     if config.ForceSSL { HTTP = "https://" } else { HTTP = "http://" }
     newLink := make([]byte, 32)
-    
+
     rand.Read(newLink)
     for i, b := range newLink {
         newLink[i] = Chars[b % byte(len(Chars))]
     }
     s := string(newLink[:])
-    
+
     fileShare := r.URL.Path[len(config.WebRoot+"/createshare"+config.WebRoot):]
     fileShare = config.Path + fileShare
     if _, err := os.Stat(fileShare); os.IsNotExist(err) {
         w.Write([]byte("Error : File "+fileShare+" not found"))
         return
-        
+
     }
-    
+
     err := ioutil.WriteFile(config.SharePath+"/"+s, []byte(fileShare), 0644)
     if err != nil {
         fmt.Println(err)
         w.Write([]byte("Error : Cannot create share"))
         return
     }
-    
-    w.Write([]byte("Share Url : "+HTTP+r.Host+config.WebRoot+"/share/"+s)) 
+
+    w.Write([]byte("Share Url : "+HTTP+r.Host+config.WebRoot+"/share/"+s))
 }
 
 func listshares(w http.ResponseWriter, r *http.Request) {
     shares, _ := ioutil.ReadDir(config.SharePath)
     var HTTP string
-    
+
     if config.ForceUrl != "" { r.Host = config.ForceUrl }
     if config.ForceSSL { HTTP = "https://" } else { HTTP = "http://" }
     var share []Share
-    
+
     for _, f := range shares {
         dat, _ := ioutil.ReadFile(config.SharePath+"/"+f.Name())
         shareTmp := Share{filepath.Base(string(dat)), HTTP+r.Host+config.WebRoot+"/share/"+f.Name(), f.Name(), config.WebRoot}
         share=append(share, shareTmp)
         log.Printf("%s", share)
     }
-    
+
     sharelist := ShareList{share, config.WebRoot}
     tmpl, _ := template.ParseFiles("templates/listshares.html")
     tmpl.Execute(w, sharelist)
@@ -269,20 +270,20 @@ func listshares(w http.ResponseWriter, r *http.Request) {
 
 func delshare(w http.ResponseWriter, r *http.Request) {
     fileDel := r.URL.Path[len(config.WebRoot+"/delshare/"):]
-    
+
     if _, err := os.Stat(config.SharePath+"/"+fileDel); os.IsNotExist(err) {
         w.Write([]byte("Error : File "+fileDel+" not found"))
         return
     }
-    
+
     os.Remove(config.SharePath+"/"+fileDel)
-    
+
     w.Write([]byte("Share deleted"))
 }
 
 func viewshare(w http.ResponseWriter, r *http.Request) {
     fileShare := r.URL.Path[len(config.WebRoot+"/share"):]
-    
+
     dat, err := ioutil.ReadFile(config.SharePath+fileShare)
     if err != nil {
         fmt.Println(err)
@@ -296,15 +297,15 @@ func viewshare(w http.ResponseWriter, r *http.Request) {
         return
     }
     filePath := filepath.Base(string(dat))
-    
+
     tmpl, err := template.ParseFiles("templates/share.html")
     if err != nil {
         http.Error(w, err.Error(), http.StatusInternalServerError)
         log.Printf(err.Error())
     }
-    
+
     UrlPath := config.WebRoot+"/getshare"+fileShare
-    
+
     share := Share{filePath, UrlPath, filePath, config.WebRoot}
     tmpl.Execute(w, share)
 }
@@ -318,10 +319,11 @@ func initFlag() {
     ForceUrl := flag.String("forceurl", "", "a string")
     ForceSSL := flag.Bool("forcessl", false, "a bool")
     SharePath := flag.String("sharepath", "share", "a string")
-    ConfigFile := flag.String("config", "", "a string") 
+    WorkPath := flag.String("workpath", "", "a string")
+    ConfigFile := flag.String("config", "", "a string")
 
     flag.Parse()
- 
+
     if *ConfigFile != "" {
         if _, err := os.Stat(*ConfigFile); os.IsNotExist(err) {
             log.Printf("Configfile not found !!!")
@@ -337,13 +339,15 @@ func initFlag() {
         config.ForceUrl = *ForceUrl
         config.ForceSSL = *ForceSSL
         config.SharePath = *SharePath
+        config.WorkPath = *WorkPath
     }
-    
+
 }
 
 func main() {
     initFlag()
-    
+
+    os.Chdir(config.WorkPath);
 
     http.HandleFunc(config.WebRoot + "/", home)
     http.HandleFunc(config.WebRoot + "/share/", viewshare)
@@ -351,7 +355,7 @@ func main() {
     http.HandleFunc(config.WebRoot + "/createshare/", createshare)
     http.HandleFunc(config.WebRoot + "/getshare/", getshare)
     http.HandleFunc(config.WebRoot + "/delshare/", delshare)
-    
+
     if _, err := os.Stat(config.SharePath); os.IsNotExist(err) {
         os.Mkdir(config.SharePath,0755)
     }
